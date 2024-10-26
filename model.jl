@@ -65,22 +65,25 @@ if termination_status(model) == MOI.OPTIMAL
     df_positive = filter(row -> row[:value] > 0, sorted_df)
     println("Q2: Composition of the portfolio and means of historical return")
     display(df_positive)
-    obj = objective_value(model)
-    println("Objective value = ", obj)
+    println("Objective value = ", objective_value(model))
 
     sorted_means = sort(mean_weekly_return, rev=true)
+    println("5 stocks with the highest historical return:")
     display(sorted_means[1:5])
 
-    duals = []
-    q = shadow_price(capital_constraint)
-    push!(duals, q)
-    println("Dual value for the capital constraint, q = ", q)
+    println("\nQ4: Optimal dual variables")
+    println("Dual value for the capital constraint, q = ", shadow_price(capital_constraint))
 
     for sector in sort(collect(keys(sector_constraints)))
-        p = shadow_price(sector_constraints[sector])
-        push!(duals, p)
-        println("Dual value for the sector $sector constraint, p_$sector = ", p)
+        println("Dual value for the sector $sector constraint, p_$sector = ", shadow_price(sector_constraints[sector]))
     end
+
+    sector = 6
+    println("\nQ6: Sensitivity analysis of the RHS of the limit of capital for sector $sector")
+    report = lp_sensitivity_report(model)
+    bounds_l6 = report[sector_constraints[sector]]
+    println("Lower bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 * capital - bounds_l6[1])
+    println("Upper bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 * capital + bounds_l6[2])
 
     #solution_summary(model; verbose = true)
 else

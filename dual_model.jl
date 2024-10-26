@@ -38,18 +38,18 @@ end
 model = Model(Gurobi.Optimizer)
 
 # Variables
-# Create a matrix of variables where p[i] <= 0 represents the shadow price for sector i
-@variable(model, p[sectors_id] <= 0)
+# Create a matrix of variables where p[i] >= 0 represents the shadow price for sector i
+@variable(model, p[sectors_id] >= 0)
 #  Create a matrix of variables where q represents the shadow price of the capital
 @variable(model, q)
 
 # Constraints
 for stock in stocks_id
-    @constraint(model, q + sum(p[sector] * mapping[Name(sector), stock] for sector in sectors_id) <= - mean_weekly_return[stock])
+    @constraint(model, q + sum(p[sector] * mapping[Name(sector), stock] for sector in sectors_id) >= mean_weekly_return[stock])
 end
 
 # Objective
-@objective(model, Min, - q * capital - 0.2 * capital * sum(p[sector] for sector in sectors_id))
+@objective(model, Min, q * capital + 0.2 * capital * sum(p[sector] for sector in sectors_id))
 
 # Solve the model
 optimize!(model)
@@ -60,7 +60,7 @@ if termination_status(model) == MOI.OPTIMAL
     obj = objective_value(model)
     println("Objective value = ", obj)
     q_value = value(q)
-    println("Dual value for the capital constraint:", q_value)
+    println("Dual value for the capital constraint: ", q_value)
 
     println("Dual values for each sector constraint:")
     p_values = value.(p)
