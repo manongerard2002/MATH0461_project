@@ -37,19 +37,19 @@ end
 # Create a new JuMP model with Gurobi as the solver
 model = Model(Gurobi.Optimizer)
 
-# Variables: Create a matrix of variables where x[i] >= 0 represents the capital invested in stock i
+# Variables: Create a matrix of variables where x[i] >= 0 represents the fraction of the capital invested in stock i
 @variable(model, x[stocks_id] >= 0)
 
 # Constraints
-capital_constraint = @constraint(model, sum(x[stock] for stock in stocks_id) == capital)
+capital_constraint = @constraint(model, sum(x[stock] for stock in stocks_id) == 1)
 
 sector_constraints = Dict{Int, ConstraintRef}()
 for sector in sectors_id
-    sector_constraints[sector] = @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2 * capital)
+    sector_constraints[sector] = @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2)
 end
 
 # Objective: Maximize the historical average weekly return
-@objective(model, Max, sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id))
+@objective(model, Max, capital * (sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id) - 1))
 
 # Solve the model
 optimize!(model)
@@ -60,7 +60,7 @@ if termination_status(model) == MOI.OPTIMAL
     x_values = value.(x)
     x_list = [x_values[stock] for stock in stocks_id]
     sector_x = [sector_mapping_dict[stock] for stock in stocks_id]
-    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list, percentage = x_list/capital, mean_return = mean_weekly_return)
+    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list, capital = x_list*capital, mean_return = mean_weekly_return)
     sorted_df = sort(x_df, :mean_return, rev=true)
     df_positive = filter(row -> row[:value] > 0, sorted_df)
     println("Q2: Composition of the portfolio and means of historical return")
@@ -82,8 +82,9 @@ if termination_status(model) == MOI.OPTIMAL
     println("\nQ6: Sensitivity analysis of the RHS of the limit of capital for sector $sector")
     report = lp_sensitivity_report(model)
     bounds_l6 = report[sector_constraints[sector]]
-    println("Lower bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 * capital - bounds_l6[1])
-    println("Upper bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 * capital + bounds_l6[2])
+    println(report[sector_constraints[sector]])
+    println("Lower bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 - bounds_l6[1])
+    println("Upper bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 + bounds_l6[2])
 
     #solution_summary(model; verbose = true)
 else
