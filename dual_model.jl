@@ -37,19 +37,19 @@ end
 # Create a new JuMP model with Gurobi as the solver
 model = Model(Gurobi.Optimizer)
 
-# Variables: Create a matrix of variables where x[i] >= 0 represents the capital invested in stock i
-@variable(model, x[stocks_id] >= 0)
+# Variables
+# Create a matrix of variables where p[i] <= 0 represents the shadow price for sector i
+@variable(model, p[sectors_id] <= 0)
+#  Create a matrix of variables where q represents the shadow price of the capital
+@variable(model, q)
 
 # Constraints
-capital_constraint = @constraint(model, sum(x[stock] for stock in stocks_id) == capital)
-
-sector_constraints = Dict{Int, ConstraintRef}()
-for sector in sectors_id
-    sector_constraints[sector] = @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2 * capital)
+for stock in stocks_id
+    @constraint(model, q + sum(p[sector] * mapping[Name(sector), stock] for sector in sectors_id) <= - mean_weekly_return[stock])
 end
 
-# Objective: Maximize the historical average weekly return
-@objective(model, Max, sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id))
+# Objective
+@objective(model, Min, - q * capital - 0.2 * capital * sum(p[sector] for sector in sectors_id))
 
 # Solve the model
 optimize!(model)
@@ -57,32 +57,16 @@ optimize!(model)
 # Print the results for each capital invested
 if termination_status(model) == MOI.OPTIMAL
     println("Optimal solution found")
-    x_values = value.(x)
-    x_list = [x_values[stock] for stock in stocks_id]
-    sector_x = [sector_mapping_dict[stock] for stock in stocks_id]
-    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list, percentage = x_list/capital, mean_return = mean_weekly_return)
-    sorted_df = sort(x_df, :mean_return, rev=true)
-    df_positive = filter(row -> row[:value] > 0, sorted_df)
-    println("Q2: Composition of the portfolio and means of historical return")
-    display(df_positive)
     obj = objective_value(model)
     println("Objective value = ", obj)
+    q_value = value(q)
+    println("Dual value for the capital constraint:", q_value)
 
-    sorted_means = sort(mean_weekly_return, rev=true)
-    display(sorted_means[1:5])
-
-    duals = []
-    q = shadow_price(capital_constraint)
-    push!(duals, q)
-    println("Dual value for the capital constraint, q = ", q)
-
-    for sector in sort(collect(keys(sector_constraints)))
-        p = shadow_price(sector_constraints[sector])
-        push!(duals, p)
-        println("Dual value for the sector $sector constraint, p_$sector = ", p)
-    end
-
-    #solution_summary(model; verbose = true)
+    println("Dual values for each sector constraint:")
+    p_values = value.(p)
+    p_list = [p_values[sector] for sector in sectors_id]
+    p_df = DataFrame(sector_id = sectors_id, value = p_list)
+    display(p_df)
 else
     println("No optimal solution found")
 end
