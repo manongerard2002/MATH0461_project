@@ -38,10 +38,10 @@ end
 model = Model(Gurobi.Optimizer)
 
 # Variables: Create a matrix of variables where x[i] >= 0 represents the fraction of the capital invested in stock i
-@variable(model, x[stocks_id] >= 0)
+@variable(model, 0 <= x[stocks_id] <= 1)
 
 # Constraints
-capital_constraint = @constraint(model, capital * sum(x[stock] for stock in stocks_id) == capital)
+capital_constraint = @constraint(model, capital * sum(x[stock] for stock in stocks_id) <= capital)
 
 sector_constraints = Dict{Int, ConstraintRef}()
 for sector in sectors_id
