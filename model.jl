@@ -7,12 +7,12 @@ Pkg.add("NamedArrays")=#
 using JuMP, Gurobi, CSV, DataFrames, NamedArrays
 
 # Data
-nb_weeks = 568
 capital = 500000
 
 # Read data data from a CSV file
 price_df = CSV.read("data.csv", DataFrame)
 stocks_id = names(price_df)
+nb_weeks = length(price_df[:, 1])
 
 sector_mapping_df = CSV.read("sector_mapping.csv", DataFrame; header=false, types=[String, Int])
 sector_mapping_dict = Dict(row.Column1 => row.Column2 for row in eachrow(sector_mapping_df))
@@ -41,11 +41,11 @@ model = Model(Gurobi.Optimizer)
 @variable(model, x[stocks_id] >= 0)
 
 # Constraints
-capital_constraint = @constraint(model, sum(x[stock] for stock in stocks_id) == 1)
+capital_constraint = @constraint(model, capital * sum(x[stock] for stock in stocks_id) == capital)
 
 sector_constraints = Dict{Int, ConstraintRef}()
 for sector in sectors_id
-    sector_constraints[sector] = @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2)
+    sector_constraints[sector] = @constraint(model, capital * sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2 * capital)
 end
 
 # Objective: Maximize the historical average weekly return
@@ -65,7 +65,8 @@ if termination_status(model) == MOI.OPTIMAL
     df_positive = filter(row -> row[:value] > 0, sorted_df)
     println("Q2: Composition of the portfolio and means of historical return")
     display(df_positive)
-    println("Objective value = ", objective_value(model))
+    println("Objective value = ", objective_value(model), "  ", capital * sum(mean_weekly_return[stock] * x_values[stock] for stock in stocks_id))
+    println(objective_value(model) - 4658.906202693179, "    ", capital * sum(mean_weekly_return[stock] * x_values[stock] for stock in stocks_id) - 504658.9062026932)
 
     sorted_means = sort(mean_weekly_return, rev=true)
     println("5 stocks with the highest historical return:")

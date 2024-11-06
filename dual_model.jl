@@ -7,12 +7,12 @@ Pkg.add("NamedArrays")=#
 using JuMP, Gurobi, CSV, DataFrames, NamedArrays
 
 # Data
-nb_weeks = 568
 capital = 500000
 
 # Read data data from a CSV file
 price_df = CSV.read("data.csv", DataFrame)
 stocks_id = names(price_df)
+nb_weeks = length(price_df[:, 1])
 
 sector_mapping_df = CSV.read("sector_mapping.csv", DataFrame; header=false, types=[String, Int])
 sector_mapping_dict = Dict(row.Column1 => row.Column2 for row in eachrow(sector_mapping_df))
@@ -45,11 +45,11 @@ model = Model(Gurobi.Optimizer)
 
 # Constraints
 for stock in stocks_id
-    @constraint(model, q + sum(p[sector] * mapping[Name(sector), stock] for sector in sectors_id) >= capital *  mean_weekly_return[stock])
+    @constraint(model, capital * q + capital * sum(p[sector] * mapping[Name(sector), stock] for sector in sectors_id) >= capital *  mean_weekly_return[stock])
 end
 
 # Objective
-@objective(model, Min, q + 0.2 * sum(p[sector] for sector in sectors_id) - capital)
+@objective(model, Min, capital * q + 0.2 * capital * sum(p[sector] for sector in sectors_id) - capital)
 
 # Solve the model
 optimize!(model)
@@ -60,13 +60,13 @@ if termination_status(model) == MOI.OPTIMAL
     obj = objective_value(model)
     println("Objective value = ", obj)
     q_value = value(q)
-    println("Dual value for the capital constraint: ", q_value)
+    println("\nQ4: Optimal dual variables")
+    println("Dual value for the capital constraint, q = ", q_value)
 
-    println("Dual values for each sector constraint:")
     p_values = value.(p)
-    p_list = [p_values[sector] for sector in sectors_id]
-    p_df = DataFrame(sector_id = sectors_id, value = p_list)
-    display(p_df)
+    for sector in sort(sectors_id)
+        println("Dual value for the sector $sector constraint, p_$sector = ", p_values[sector])
+    end
 else
     println("No optimal solution found")
 end
