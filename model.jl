@@ -39,34 +39,24 @@ end
 
 # Create a new JuMP model with Gurobi as the solver
 model = Model(Gurobi.Optimizer)
+set_optimizer_attribute(model, "OutputFlag", 0)
 
 # Variables: Create a matrix of variables where x[i] in [0, 1] represents the fraction of the capital invested in stock i
 @variable(model, 0 <= x[stocks_id] <= 1)
 
 # Constraints
-capital_constraint = @constraint(model, capital * sum(x[stock] for stock in stocks_id) <= capital)
+capital_constraint = @constraint(model, sum(x[stock] for stock in stocks_id) <= 1)
 
 sector_constraints = Dict{Int, ConstraintRef}()
 for sector in sectors_id
-    sector_constraints[sector] = @constraint(model, capital * sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2 * capital)
+    sector_constraints[sector] = @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2)
 end
 
 # Objective: Maximize the historical average weekly return
-@objective(model, Max, capital * (sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id) - 1))
+@objective(model, Max, sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id))
 
 # Solve the model
 optimize!(model)
-
-function constraint_report(name, c, report)
-    return (
-        name = name,
-        slack = normalized_rhs(c) - value(c),
-        dual = shadow_price(c),
-        b = normalized_rhs(c),
-        allowed_increase = report[c][2],
-        allowed_decrease = - report[c][1],
-    )
-end
 
 # Print the results for each capital invested
 if termination_status(model) == MOI.OPTIMAL
@@ -74,8 +64,8 @@ if termination_status(model) == MOI.OPTIMAL
     x_values = value.(x)
     x_list = [x_values[stock] for stock in stocks_id]
     sector_x = [sector_mapping_dict[stock] for stock in stocks_id]
-    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list*100, capital = x_list*capital, mean_return = mean_weekly_return)
-    sorted_df = sort(x_df, :mean_return, rev=true)
+    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list*100, capital = x_list*capital, mean_weekly_return = mean_weekly_return)
+    sorted_df = sort(x_df, :mean_weekly_return, rev=true)
     df_positive = filter(row -> row[:value] > 0, sorted_df)
     println("Q2: Composition of the portfolio and means of historical return")
     display(df_positive)
@@ -109,10 +99,9 @@ if termination_status(model) == MOI.OPTIMAL
     end
 
     # Uncomment this part to see the values of the duals that here verified
-    #=
     q_computed = 0
     p_computed = NamedArray(zeros(Float64, length(sectors_id)), (sectors_id), ("Sectors"))
-    delta_increase = 1
+    delta_increase = 0.1
     set_normalized_rhs(capital_constraint, normalized_rhs(capital_constraint) + delta_increase)
     optimize!(model)
     q_computed = (objective_value(model) - objective) / delta_increase
@@ -120,9 +109,9 @@ if termination_status(model) == MOI.OPTIMAL
     optimize!(model)
 
     p_computed = NamedArray(zeros(Float64, length(sectors_id)), (sectors_id), ("Sectors"))
-    delta_decrease = -0.01 * capital
+    delta_decrease = -0.01
     for sector in sector_sorted
-        constraint = sector_constraints[sector]
+        local constraint = sector_constraints[sector]
         set_normalized_rhs(constraint, normalized_rhs(constraint) + delta_decrease)
         optimize!(model)
         p_computed[Name(sector)] = (objective_value(model) - objective) / delta_decrease
@@ -140,7 +129,7 @@ if termination_status(model) == MOI.OPTIMAL
         p_computed = p_computed_values,
         difference = p_values .- p_computed_values
     )
-    display(dual_df)=#
+    display(dual_df)
 
     sector = 6
     println("\nQ6: Sensitivity analysis of the RHS of the limit of capital for sector $sector")
@@ -159,10 +148,8 @@ if termination_status(model) == MOI.OPTIMAL
     x_axis = decrease:0.1:increase
     y_axis = objective .+ p[Name(sector)] * x_axis
     x_axis_2 = (decrease + rhs_6):0.1:(increase + rhs_6)
-    display(x_axis)
-    display(x_axis_2)
 
-    plot(x_axis, y_axis, xlabel=L"$\Delta l_6$", ylabel="Objective value", label=L"$4658.906 + 0.40013 \times \Delta l_6$")
+    plot(x_axis, y_axis, xlabel=L"$\Delta l_6$", ylabel="Expected Return [%]", label=L"$4658.906 + 0.40013 \times \Delta l_6$")
     plt2 = plot!(twiny(), x_axis_2, y_axis, xlabel=L"$l_6$", legend = false)
     savefig(plt2, "Q6_plot.pdf")
 

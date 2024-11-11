@@ -36,6 +36,7 @@ end
 
 # Create a new JuMP model with Gurobi as the solver
 model = Model(Gurobi.Optimizer)
+set_optimizer_attribute(model, "OutputFlag", 0)
 
 # Variables
 # Create a matrix of variables where p[i] >= 0 represents the shadow price for sector i
@@ -45,11 +46,11 @@ model = Model(Gurobi.Optimizer)
 
 # Constraints
 for stock in stocks_id
-    @constraint(model, capital * q + capital * sum(p[sector] * mapping[Name(sector), stock] for sector in sectors_id) >= capital *  mean_weekly_return[stock])
+    @constraint(model, q + sum(p[sector] * mapping[Name(sector), stock] for sector in sectors_id) >= mean_weekly_return[stock])
 end
 
 # Objective
-@objective(model, Min, capital * q + 0.2 * capital * sum(p[sector] for sector in sectors_id) - capital)
+@objective(model, Min, q + 0.2 * sum(p[sector] for sector in sectors_id))
 
 # Solve the model
 optimize!(model)
