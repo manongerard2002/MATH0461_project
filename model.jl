@@ -149,7 +149,7 @@ if termination_status(model) == MOI.OPTIMAL
     y_axis = objective .+ p[Name(sector)] * x_axis
     x_axis_2 = (decrease + rhs_6):0.1:(increase + rhs_6)
 
-    plot(x_axis, y_axis, xlabel=L"$\Delta l_6$", ylabel="Expected Return [%]", label=L"$4658.906 + 0.40013 \times \Delta l_6$")
+    plot(x_axis, y_axis, xlabel=L"$\Delta l_6$", ylabel="Expected Return [%]", label=L"$1.009318 + 0.40013 \times \Delta l_6$")
     plt2 = plot!(twiny(), x_axis_2, y_axis, xlabel=L"$l_6$", legend = false)
     savefig(plt2, "Q6_plot.pdf")
 
