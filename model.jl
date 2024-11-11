@@ -3,8 +3,11 @@ Pkg.add("JuMP")
 Pkg.add("Gurobi")
 Pkg.add("CSV")
 Pkg.add("DataFrames")
-Pkg.add("NamedArrays")=#
-using JuMP, Gurobi, CSV, DataFrames, NamedArrays
+Pkg.add("NamedArrays")
+Pkg.add("MathOptInterface")
+Pkg.add("Plots")
+Pkg.add("LaTeXStrings")=#
+using JuMP, Gurobi, CSV, DataFrames, NamedArrays, MathOptInterface, Plots, LaTeXStrings
 
 # Data
 capital = 500000
@@ -37,7 +40,7 @@ end
 # Create a new JuMP model with Gurobi as the solver
 model = Model(Gurobi.Optimizer)
 
-# Variables: Create a matrix of variables where x[i] >= 0 represents the fraction of the capital invested in stock i
+# Variables: Create a matrix of variables where x[i] in [0, 1] represents the fraction of the capital invested in stock i
 @variable(model, 0 <= x[stocks_id] <= 1)
 
 # Constraints
@@ -54,40 +57,139 @@ end
 # Solve the model
 optimize!(model)
 
+function constraint_report(name, c, report)
+    return (
+        name = name,
+        slack = normalized_rhs(c) - value(c),
+        dual = shadow_price(c),
+        b = normalized_rhs(c),
+        allowed_increase = report[c][2],
+        allowed_decrease = - report[c][1],
+    )
+end
+
 # Print the results for each capital invested
 if termination_status(model) == MOI.OPTIMAL
     println("Optimal solution found")
     x_values = value.(x)
     x_list = [x_values[stock] for stock in stocks_id]
     sector_x = [sector_mapping_dict[stock] for stock in stocks_id]
-    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list, capital = x_list*capital, mean_return = mean_weekly_return)
+    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list*100, capital = x_list*capital, mean_return = mean_weekly_return)
     sorted_df = sort(x_df, :mean_return, rev=true)
     df_positive = filter(row -> row[:value] > 0, sorted_df)
     println("Q2: Composition of the portfolio and means of historical return")
     display(df_positive)
-    println("Objective value = ", objective_value(model), "  ", capital * sum(mean_weekly_return[stock] * x_values[stock] for stock in stocks_id))
-    println(objective_value(model) - 4658.906202693179, "    ", capital * sum(mean_weekly_return[stock] * x_values[stock] for stock in stocks_id) - 504658.9062026932)
+    objective = objective_value(model)
+    println("Objective value = ", objective)
+
+    v_stat = Dict(
+           xi => MOI.get(model, MOI.VariableBasisStatus(), xi)
+           for xi in all_variables(model)
+       )
+    basis = []
+    for stock in stocks_id
+        if v_stat[x[stock]] == MathOptInterface.BASIC
+            push!(basis, stock)
+        end
+    end
+    println("Basis = ", basis)
 
     sorted_means = sort(mean_weekly_return, rev=true)
     println("5 stocks with the highest historical return:")
     display(sorted_means[1:5])
 
     println("\nQ4: Optimal dual variables")
-    println("Dual value for the capital constraint, q = ", shadow_price(capital_constraint))
-
-    for sector in sort(collect(keys(sector_constraints)))
-        println("Dual value for the sector $sector constraint, p_$sector = ", shadow_price(sector_constraints[sector]))
+    sector_sorted = sort(collect(keys(sector_constraints)))
+    q = shadow_price(capital_constraint)
+    println("Dual value for the capital constraint, q = ", q)
+    p = NamedArray(zeros(Float64, length(sectors_id)), (sectors_id), ("Sectors"))
+    for sector in sector_sorted
+        p[Name(sector)] = shadow_price(sector_constraints[sector])
+        println("Dual value for the sector $sector constraint, p_$sector = ", p[Name(sector)])
     end
+
+    # Uncomment this part to see the values of the duals that here verified
+    #=
+    q_computed = 0
+    p_computed = NamedArray(zeros(Float64, length(sectors_id)), (sectors_id), ("Sectors"))
+    delta_increase = 1
+    set_normalized_rhs(capital_constraint, normalized_rhs(capital_constraint) + delta_increase)
+    optimize!(model)
+    q_computed = (objective_value(model) - objective) / delta_increase
+    set_normalized_rhs(capital_constraint, normalized_rhs(capital_constraint) - delta_increase)
+    optimize!(model)
+
+    p_computed = NamedArray(zeros(Float64, length(sectors_id)), (sectors_id), ("Sectors"))
+    delta_decrease = -0.01 * capital
+    for sector in sector_sorted
+        constraint = sector_constraints[sector]
+        set_normalized_rhs(constraint, normalized_rhs(constraint) + delta_decrease)
+        optimize!(model)
+        p_computed[Name(sector)] = (objective_value(model) - objective) / delta_decrease
+        set_normalized_rhs(constraint, normalized_rhs(constraint) - delta_decrease)
+    end
+
+    optimize!(model)
+
+    sector_names = vcat("capital constraint", ["sector $sector constraint" for sector in sector_sorted])
+    p_values = vcat([q], [p[Name(sector)] for sector in sector_sorted])
+    p_computed_values = vcat([q_computed], [p_computed[Name(sector)] for sector in sector_sorted])
+    dual_df = DataFrame(
+        sector = sector_names,
+        p = p_values,
+        p_computed = p_computed_values,
+        difference = p_values .- p_computed_values
+    )
+    display(dual_df)=#
 
     sector = 6
     println("\nQ6: Sensitivity analysis of the RHS of the limit of capital for sector $sector")
     report = lp_sensitivity_report(model)
-    bounds_l6 = report[sector_constraints[sector]]
-    println(report[sector_constraints[sector]])
-    println("Lower bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 - bounds_l6[1])
-    println("Upper bound of RHS for sector $sector in which the optimal basis stays the same = ", 0.2 + bounds_l6[2])
+    constraint = sector_constraints[sector]
+    decrease, increase = report[constraint]
+    println("Lower bound of the delta on the RHS for sector $sector in which the optimal basis stays the same = ", decrease)
+    println("Upper bound of the delta on the RHS for sector $sector in which the optimal basis stays the same = ", increase)
+    rhs_6 = normalized_rhs(sector_constraints[sector])
+    println("Lower bound of RHS for sector $sector in which the optimal basis stays the same = ", rhs_6 + decrease)
+    println("Upper bound of RHS for sector $sector in which the optimal basis stays the same = ", rhs_6 + increase)
 
-    #solution_summary(model; verbose = true)
+    println("New solution for when the optimal basis stays the same:")
+    println("lower bound = ", objective + p[Name(sector)] * decrease)
+    println("upper bound = ", objective + p[Name(sector)] * increase)
+    x_axis = decrease:0.1:increase
+    y_axis = objective .+ p[Name(sector)] * x_axis
+    x_axis_2 = (decrease + rhs_6):0.1:(increase + rhs_6)
+    display(x_axis)
+    display(x_axis_2)
+
+    plot(x_axis, y_axis, xlabel=L"$\Delta l_6$", ylabel="Objective value", label=L"$4658.906 + 0.40013 \times \Delta l_6$")
+    plt2 = plot!(twiny(), x_axis_2, y_axis, xlabel=L"$l_6$", legend = false)
+    savefig(plt2, "Q6_plot.pdf")
+
+    #=set_normalized_rhs(constraint, normalized_rhs(constraint) + decrease)
+    optimize!(model)
+
+    println("lower bound = ", objective_value(model))
+    x_values = value.(x)
+    x_list = [x_values[stock] for stock in stocks_id]
+    x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list*100, capital = x_list*capital, mean_return = mean_weekly_return)
+    sorted_df = sort(x_df, :mean_return, rev=true)
+    df_positive = filter(row -> row[:value] > 0, sorted_df)
+    display(df_positive)
+
+    v_stat = Dict(
+           xi => MOI.get(model, MOI.VariableBasisStatus(), xi)
+           for xi in all_variables(model)
+       )
+    new_basis = []
+    for stock in stocks_id
+        if v_stat[x[stock]] == MathOptInterface.BASIC
+            push!(new_basis, stock)
+        end
+    end
+    println("Basis = ", new_basis)
+
+    #set_normalized_rhs(constraint, normalized_rhs(constraint) - decrease)=#
 else
     println("No optimal solution found")
 end

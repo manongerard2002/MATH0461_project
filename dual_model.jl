@@ -41,7 +41,7 @@ model = Model(Gurobi.Optimizer)
 # Create a matrix of variables where p[i] >= 0 represents the shadow price for sector i
 @variable(model, p[sectors_id] >= 0)
 #  Create a matrix of variables where q represents the shadow price of the capital
-@variable(model, q)
+@variable(model, q >= 0)
 
 # Constraints
 for stock in stocks_id
