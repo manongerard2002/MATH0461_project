@@ -87,7 +87,8 @@ for gamma in gamma_df[:, 1]
     end
 end
 
-plt = scatter(efficient_frontier.risk, efficient_frontier.expected_return, xlabel="Risk (Portfolio Variance)", ylabel="Expected Return [%]", legend=false)
+plt = scatter(efficient_frontier.risk, efficient_frontier.expected_return, xlabel="Risk (Portfolio Variance)", ylabel="Expected Return [%]", label="", legend=:bottomright)
+plot(plt, efficient_frontier.risk, efficient_frontier.expected_return, color=:blue, label="efficient frontier")
 
 s = size(efficient_frontier, 1)
 annotate!(efficient_frontier.risk[1] - 1.2, efficient_frontier.expected_return[1] - 0.03, text("γ=" * string(efficient_frontier.gamma[1]), :left, 8))
@@ -103,4 +104,4 @@ end
 for i in s-1:s
     annotate!(efficient_frontier.risk[i] + 0.4, efficient_frontier.expected_return[i], text("γ=" * string(efficient_frontier.gamma[i]), :left, 8))
 end
-savefig(plt, "Q8_plot.pdf")
+savefig("Q8_plot.pdf")

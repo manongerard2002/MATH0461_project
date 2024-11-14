@@ -20,7 +20,7 @@ nb_weeks = length(price_df[:, 1])
 sector_mapping_df = CSV.read("sector_mapping.csv", DataFrame; header=false, types=[String, Int])
 sector_mapping_dict = Dict(row.Column1 => row.Column2 for row in eachrow(sector_mapping_df))
 
-sectors_id = sort(unique(sector_mapping_df[:, 2])) # Note: starts at 0
+sectors_id = sort(unique(sector_mapping_df[:, 2]))
 
 mapping = NamedArray(zeros(Int, length(sectors_id), length(stocks_id)), (sectors_id, stocks_id), ("Sectors", "Stocks"))
 for row in eachrow(sector_mapping_df)
@@ -37,27 +37,37 @@ for stock in stocks_id
     mean_weekly_return[stock] = sum(weekly_return[stock, Name(week)] for week in 2:nb_weeks) / (nb_weeks - 1)
 end
 
-# Create a new JuMP model with Gurobi as the solver
-model = Model(Gurobi.Optimizer)
-set_optimizer_attribute(model, "OutputFlag", 0)
+#method = 0 for primal simplex; 1 for dual simplex
+#presolve = -1 for default; 0 to deactivate
+#output = 1 for default; 0 to deactivate
+function solveModel(method, presolve=-1, output=0)
+    # Create a new JuMP model with Gurobi as the solver
+    model = Model(Gurobi.Optimizer)
+    set_optimizer_attribute(model, "OutputFlag", output)
+    set_optimizer_attribute(model, "Method", method)
+    set_optimizer_attribute(model, "Presolve", presolve)
 
-# Variables: Create a matrix of variables where x[i] in [0, 1] represents the fraction of the capital invested in stock i
-@variable(model, 0 <= x[stocks_id] <= 1)
+    # Variables: Create a matrix of variables where x[i] in [0, 1] represents the fraction of the capital invested in stock i
+    @variable(model, 0 <= x[stocks_id] <= 1)
 
-# Constraints
-capital_constraint = @constraint(model, sum(x[stock] for stock in stocks_id) <= 1)
+    # Constraints
+    capital_constraint = @constraint(model, sum(x[stock] for stock in stocks_id) <= 1)
 
-sector_constraints = Dict{Int, ConstraintRef}()
-for sector in sectors_id
-    sector_constraints[sector] = @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2)
+    sector_constraints = Dict{Int, ConstraintRef}()
+    for sector in sectors_id
+        sector_constraints[sector] = @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2)
+    end
+
+    # Objective: Maximize the historical average weekly return
+    @objective(model, Max, sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id))
+
+    # Solve the model
+    optimize!(model)
+
+    return model, capital_constraint, sector_constraints, x
 end
 
-# Objective: Maximize the historical average weekly return
-@objective(model, Max, sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id))
-
-# Solve the model
-optimize!(model)
-
+model, capital_constraint, sector_constraints, x = solveModel(0)
 # Print the results for each capital invested
 if termination_status(model) == MOI.OPTIMAL
     println("Optimal solution found")
@@ -67,7 +77,9 @@ if termination_status(model) == MOI.OPTIMAL
     x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list*100, capital = x_list*capital, mean_weekly_return = mean_weekly_return)
     sorted_df = sort(x_df, :mean_weekly_return, rev=true)
     df_positive = filter(row -> row[:value] > 0, sorted_df)
+    println("------------------------------------------------------------------------")
     println("Q2: Composition of the portfolio and means of historical return")
+    println("------------------------------------------------------------------------")
     display(df_positive)
     objective = objective_value(model)
     println("Objective value = ", objective)
@@ -88,7 +100,9 @@ if termination_status(model) == MOI.OPTIMAL
     println("5 stocks with the highest historical return:")
     display(sorted_means[1:5])
 
-    println("\nQ4: Optimal dual variables")
+    println("\n\n------------------------------------------------------------------------")
+    println("Q4: Optimal dual variables")
+    println("------------------------------------------------------------------------")
     sector_sorted = sort(collect(keys(sector_constraints)))
     q = shadow_price(capital_constraint)
     println("Dual value for the capital constraint, q = ", q)
@@ -99,12 +113,14 @@ if termination_status(model) == MOI.OPTIMAL
     end
 
     # Uncomment this part to see the values of the duals that here verified
-    q_computed = 0
+    #=q_computed = 0
     p_computed = NamedArray(zeros(Float64, length(sectors_id)), (sectors_id), ("Sectors"))
     delta_increase = 0.1
     set_normalized_rhs(capital_constraint, normalized_rhs(capital_constraint) + delta_increase)
     optimize!(model)
-    q_computed = (objective_value(model) - objective) / delta_increase
+    if termination_status(model) == MOI.OPTIMAL
+        q_computed = (objective_value(model) - objective) / delta_increase
+    end
     set_normalized_rhs(capital_constraint, normalized_rhs(capital_constraint) - delta_increase)
     optimize!(model)
 
@@ -114,10 +130,11 @@ if termination_status(model) == MOI.OPTIMAL
         local constraint = sector_constraints[sector]
         set_normalized_rhs(constraint, normalized_rhs(constraint) + delta_decrease)
         optimize!(model)
-        p_computed[Name(sector)] = (objective_value(model) - objective) / delta_decrease
+        if termination_status(model) == MOI.OPTIMAL
+            p_computed[Name(sector)] = (objective_value(model) - objective) / delta_decrease
+        end
         set_normalized_rhs(constraint, normalized_rhs(constraint) - delta_decrease)
     end
-
     optimize!(model)
 
     sector_names = vcat("capital constraint", ["sector $sector constraint" for sector in sector_sorted])
@@ -129,22 +146,31 @@ if termination_status(model) == MOI.OPTIMAL
         p_computed = p_computed_values,
         difference = p_values .- p_computed_values
     )
-    display(dual_df)
+    display(dual_df)=#
 
+    println("\n\n------------------------------------------------------------------------")
+    println("Q5: Primal vs Dual simplex algorithms")
+    println("------------------------------------------------------------------------")
+    primal_model, _, _, _ = solveModel(0, 0, 1)
+    println("Primal simplex number of iterations = ", simplex_iterations(primal_model))
+    println("------------------------------------------------------------------------")
+    dual_model, _, _, _ = solveModel(1, 0, 1)
+    println("Dual simplex number of iterations = ", simplex_iterations(dual_model))
+
+    println("\n\n------------------------------------------------------------------------")
     sector = 6
-    println("\nQ6: Sensitivity analysis of the RHS of the limit of capital for sector $sector")
+    println("Q6: Sensitivity analysis of the RHS of the limit of capital for sector $sector")
+    println("------------------------------------------------------------------------")
     report = lp_sensitivity_report(model)
     constraint = sector_constraints[sector]
     decrease, increase = report[constraint]
-    println("Lower bound of the delta on the RHS for sector $sector in which the optimal basis stays the same = ", decrease)
-    println("Upper bound of the delta on the RHS for sector $sector in which the optimal basis stays the same = ", increase)
+    println("The optimal basis stays the same for:")
+    println("∆l_6 = [", decrease, ",", increase, "]")
     rhs_6 = normalized_rhs(sector_constraints[sector])
-    println("Lower bound of RHS for sector $sector in which the optimal basis stays the same = ", rhs_6 + decrease)
-    println("Upper bound of RHS for sector $sector in which the optimal basis stays the same = ", rhs_6 + increase)
+    println("l_6 = [", rhs_6 + decrease, ",", rhs_6 + increase, "]")
 
-    println("New solution for when the optimal basis stays the same:")
-    println("lower bound = ", objective + p[Name(sector)] * decrease)
-    println("upper bound = ", objective + p[Name(sector)] * increase)
+    println("New solution for when the optimal basis stays the same ranges from ", objective + p[Name(sector)] * decrease, "to ", objective + p[Name(sector)] * increase)
+
     x_axis = decrease:0.1:increase
     y_axis = objective .+ p[Name(sector)] * x_axis
     x_axis_2 = (decrease + rhs_6):0.1:(increase + rhs_6)
@@ -152,10 +178,10 @@ if termination_status(model) == MOI.OPTIMAL
     plot(x_axis, y_axis, xlabel=L"$\Delta l_6$", ylabel="Expected Return [%]", label=L"$1.009318 + 0.40013 \times \Delta l_6$")
     plt2 = plot!(twiny(), x_axis_2, y_axis, xlabel=L"$l_6$", legend = false)
     savefig(plt2, "Q6_plot.pdf")
-
+    
+    # Uncomment to optimize the problem using the lower bound of delta l_6 in order to check our result 
     #=set_normalized_rhs(constraint, normalized_rhs(constraint) + decrease)
     optimize!(model)
-
     println("lower bound = ", objective_value(model))
     x_values = value.(x)
     x_list = [x_values[stock] for stock in stocks_id]
@@ -175,7 +201,6 @@ if termination_status(model) == MOI.OPTIMAL
         end
     end
     println("Basis = ", new_basis)
-
     #set_normalized_rhs(constraint, normalized_rhs(constraint) - decrease)=#
 else
     println("No optimal solution found")
