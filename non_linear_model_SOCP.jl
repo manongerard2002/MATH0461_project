@@ -5,8 +5,9 @@ Pkg.add("CSV")
 Pkg.add("DataFrames")
 Pkg.add("NamedArrays")
 Pkg.add("Plots")
-Pkg.add("Statistics")=#
-using JuMP, Gurobi, CSV, DataFrames, NamedArrays, Plots, Statistics
+Pkg.add("Statistics")
+Pkg.add("LinearAlgebra")=#
+using JuMP, Gurobi, CSV, DataFrames, NamedArrays, Plots, Statistics, LinearAlgebra
 
 # Data
 capital = 500000
@@ -37,6 +38,7 @@ for stock in stocks_id
 end
 
 Q = NamedArray(cov(Matrix(weekly_return)'), (stocks_id, stocks_id), ("Stocks", "Stocks"))
+R = cholesky(Q).U
 
 gamma_df = CSV.read("gamma_vals.csv", DataFrame; header=false)
 
@@ -49,11 +51,13 @@ set_optimizer_attribute(model, "OutputFlag", 0)
 # Variables: Create a matrix of variables where x[i] in [0, 1] represents the fraction of the capital invested in stock i
 @variable(model, 0 <= x[stocks_id] <= 1)
 
-# Add variables expected_return and risk to be able to retrieve their values
+# Auxiliary variable for SOCP
+@variable(model, t)
+@variable(model, Rx[1:size(R, 1)])
+
+# Add variables expected_return to be able to retrieve its value
 @variable(model, expected_return)
 @constraint(model, expected_return == sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id))
-@variable(model, risk)
-@constraint(model, risk == sum(x[i] * Q[i, j] * x[j] for i in stocks_id, j in stocks_id))
 
 # Constraints
 @constraint(model, sum(x[stock] for stock in stocks_id) <= 1)
@@ -62,9 +66,15 @@ for sector in sectors_id
     @constraint(model, sum(x[stock] * mapping[Name(sector), stock] for stock in stocks_id) <= 0.2)
 end
 
+for i in 1:size(R, 1)
+    @constraint(model, Rx[i] == sum(R[i, j] * x[stock] for (j, stock) in enumerate(stocks_id)))
+end
+
+@constraint(model, [(t + 1)/2; Rx; (t - 1)/2] in SecondOrderCone())
+
 for gamma in gamma_df[:, 1]
     # Objective: Maximize the utility, representing the trade-off between the average historical return and the risk of the portfolio
-    @objective(model, Max, expected_return - gamma * risk)
+    @objective(model, Max, expected_return - gamma * t)
 
     # Solve the model
     optimize!(model)
@@ -73,11 +83,13 @@ for gamma in gamma_df[:, 1]
         println("Optimal solution found for γ = ", gamma)
 
         # Store results for plotting the efficient frontier
-        push!(efficient_frontier, (gamma=gamma, expected_return=value(expected_return), risk=value(risk)))
+        Rx_values = value.(Rx)
+        push!(efficient_frontier, (gamma=gamma, expected_return=value(expected_return), risk=Rx_values'Rx_values))
     else
         println("No optimal solution found for γ = ", gamma)
     end
 end
+display(efficient_frontier)
 
 plt = scatter(efficient_frontier.risk, efficient_frontier.expected_return, xlabel="Risk (Portfolio Variance)", ylabel="Expected Return [%]", label="", legend=:bottomright)
 plot(plt, efficient_frontier.risk, efficient_frontier.expected_return, color=:blue, label="efficient frontier")
@@ -96,4 +108,4 @@ end
 for i in s-1:s
     annotate!(efficient_frontier.risk[i] + 0.4, efficient_frontier.expected_return[i], text("γ=" * string(efficient_frontier.gamma[i]), :left, 8))
 end
-savefig("Q8_plot.pdf")
+savefig("Q8_SOCP_plot.pdf")
