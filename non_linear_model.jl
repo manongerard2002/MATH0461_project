@@ -36,7 +36,7 @@ for stock in stocks_id
     mean_weekly_return[stock] = sum(weekly_return[stock, Name(week)] for week in 2:nb_weeks) / (nb_weeks - 1)
 end
 
-Q = NamedArray(cov(Matrix(weekly_return)'), (stocks_id, stocks_id), ("Stocks", "Stocks"))
+Sigma = NamedArray(cov(Matrix(weekly_return)'), (stocks_id, stocks_id), ("Stocks", "Stocks"))
 
 gamma_df = CSV.read("gamma_vals.csv", DataFrame; header=false)
 
@@ -53,7 +53,7 @@ set_optimizer_attribute(model, "OutputFlag", 0)
 @variable(model, expected_return)
 @constraint(model, expected_return == sum(mean_weekly_return[stock] * x[stock] for stock in stocks_id))
 @variable(model, risk)
-@constraint(model, risk == sum(x[i] * Q[i, j] * x[j] for i in stocks_id, j in stocks_id))
+@constraint(model, risk == sum(x[i] * Sigma[i, j] * x[j] for i in stocks_id, j in stocks_id))
 
 # Constraints
 @constraint(model, sum(x[stock] for stock in stocks_id) <= 1)

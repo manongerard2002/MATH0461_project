@@ -71,15 +71,15 @@ model, capital_constraint, sector_constraints, x = solveModel(0)
 # Print the results for each capital invested
 if termination_status(model) == MOI.OPTIMAL
     println("Optimal solution found")
+    println("------------------------------------------------------------------------")
+    println("Q2: Composition of the portfolio and means of historical return")
+    println("------------------------------------------------------------------------")
     x_values = value.(x)
     x_list = [x_values[stock] for stock in stocks_id]
     sector_x = [sector_mapping_dict[stock] for stock in stocks_id]
     x_df = DataFrame(stock_id = stocks_id, sector = sector_x, value = x_list*100, capital = x_list*capital, mean_weekly_return = mean_weekly_return)
     sorted_df = sort(x_df, :mean_weekly_return, rev=true)
     df_positive = filter(row -> row[:value] > 0, sorted_df)
-    println("------------------------------------------------------------------------")
-    println("Q2: Composition of the portfolio and means of historical return")
-    println("------------------------------------------------------------------------")
     display(df_positive)
     objective = objective_value(model)
     println("Objective value = ", objective)
@@ -169,7 +169,7 @@ if termination_status(model) == MOI.OPTIMAL
     rhs_6 = normalized_rhs(sector_constraints[sector])
     println("l_6 = [", rhs_6 + decrease, ",", rhs_6 + increase, "]")
 
-    println("New solution for when the optimal basis stays the same ranges from ", objective + p[Name(sector)] * decrease, "to ", objective + p[Name(sector)] * increase)
+    println("New solution for when the optimal basis stays the same ranges from ", objective + p[Name(sector)] * decrease, " to ", objective + p[Name(sector)] * increase)
 
     x_axis = decrease:0.1:increase
     y_axis = objective .+ p[Name(sector)] * x_axis

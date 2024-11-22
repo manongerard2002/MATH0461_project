@@ -37,8 +37,8 @@ for stock in stocks_id
     mean_weekly_return[stock] = sum(weekly_return[stock, Name(week)] for week in 2:nb_weeks) / (nb_weeks - 1)
 end
 
-Q = NamedArray(cov(Matrix(weekly_return)'), (stocks_id, stocks_id), ("Stocks", "Stocks"))
-R = cholesky(Q).U
+Sigma = NamedArray(cov(Matrix(weekly_return)'), (stocks_id, stocks_id), ("Stocks", "Stocks"))
+R = cholesky(Sigma).U
 
 gamma_df = CSV.read("gamma_vals.csv", DataFrame; header=false)
 
@@ -89,7 +89,6 @@ for gamma in gamma_df[:, 1]
         println("No optimal solution found for γ = ", gamma)
     end
 end
-display(efficient_frontier)
 
 plt = scatter(efficient_frontier.risk, efficient_frontier.expected_return, xlabel="Risk (Portfolio Variance)", ylabel="Expected Return [%]", label="", legend=:bottomright)
 plot(plt, efficient_frontier.risk, efficient_frontier.expected_return, color=:blue, label="efficient frontier")
